@@ -44,7 +44,7 @@ These are values stored and used in config.ini
 
 progress_interval: Frequency of message updates during json reformatting.
 
-FateLocation: path to the FATE game installation. Must be set for fpxcmd to work correctly!
+FateLocation: path to the FATE game installation. Must be set for fpxcmd to work correctly! If fpxcmd is installed into the game directory itself, it will automatically set this. Otherwise, the user must manually configure the game's location.
 
 DataLocation: path to the FATE save data directory. Not used by fpxcmd.
 
@@ -52,22 +52,24 @@ make_json_pretty: Makes the json files human-legible by adding whitespace. Takes
 
 allow_overwrite: Turn on if you need to re-run -update for some reason. This will destroy your old copy of the game in /master.
 
-debug: A number 1-4, related to message filtering. default is 2. Messages with a lower priority than this number are hidden (they still appear in errors.log)
+master_made: Tracks if the master copy has been made. Also needs to be set to "NO" if you want to re-run -update.
+
+debug: A number 1-4, related to message filtering. default is 2. Messages with a lower priority than this number are hidden in the command line interface (they still appear in errors.log)
 
 
 
 modlist.json
 ================================================================================
-Created by the -scan command, this stores all known mods and their current state. It will also store all current file indexes, used by the patching process.
+Created by the -scan command, this stores all known mods and their current state. It will also store all current file indexes, used by the patching process. This file is stored with fpxcmd.
 
 
 
 edited.json
 ================================================================================
-Created during -deploy, this is a list of all files that were added or edited by the COPY process. This file is used to revert changes when a file is no longer being modified.
+Created during -deploy, this is a list of all files that were added or edited by the COPY process. This file is used to revert changes when a file is no longer being modified. This file is stored in the \master folder.
 
 
 
 patched.json
 ================================================================================
-Created during -deploy, this is a list of all indexed files and the files that are patching them.
+Created during -deploy, this is a list of all indexed files and the files that are patching them. This file is stored in the \master folder.
