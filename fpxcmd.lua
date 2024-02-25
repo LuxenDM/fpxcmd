@@ -7,16 +7,16 @@ local json = dofile("rxi_json.lua")
 
 
 local fpx_dir = lfs.currentdir()
-local fpx_log = "fpxcmd v1.0.0, made by Luxen De'Mark (2024)\n    operating out of " .. fpx_dir .. "\n"
+local fpx_log = "fpxcmd v1.0.1, made by Luxen De'Mark (2024)\n    operating out of " .. fpx_dir .. "\n"
 print(fpx_log)
 
 local config = {
 	FateLocation = "C:\\SteamLibrary\\steamapps\\common\\FATE", --where the game is stored
 	DataLocation = "C:\\ProgramData\\WildTangent\\FateSteam", --used by FatePatcher, not fpxcmd
 	debug = "2", --print log levels below this are not shown (still saved to log file)
-	make_json_pretty = "YES", --very slow! Makes json files human-readable by adding whitespacing
+	make_json_pretty = "NO", --very slow! Makes json files human-readable by adding whitespacing
 	progress_interval = "10", --update interval on pretty-formatting json
-	allow_overwrite = "YES", --update will overwrite existing files, only enable for debugging!
+	allow_overwrite = "NO", --update will overwrite existing files, only enable for debugging!
 }
 
 local levels = {
@@ -72,6 +72,10 @@ else
 	cp("Fate directory not configured properly! Either modify the directory manually in config.ini or use '-set FateLocation <path\\to\\FATE>'", 4)
 end
 
+if not lfs.attributes(".\\mods", "mode") == "directory" then
+    lfs.mkdir(".\\mods")
+end
+
 local function readFile(filePath)
     local file = io.open(filePath, "r")
 	
@@ -90,7 +94,8 @@ local function writeFile(filePath, contents)
 	local file = io.open(filePath, "w")
 	
 	if not file then
-		error("Unable to save file: " .. filePath)
+		cp("Unable to save file: " .. filePath, 4)
+		return
 	end
 	
 	file:write(contents)
@@ -102,12 +107,14 @@ local function copyFile(source, destination)
 	cp("Copying " .. source .. " to " .. destination, 1)
     local sourceFile = io.open(source, "rb")
     if not sourceFile then
+        cp("    Unable to open file: " .. source, 4)
         return false, "Failed to open source file"
     end
     
     local destinationFile = io.open(destination, "wb")
     if not destinationFile then
         sourceFile:close()
+        cp("    Unable to open file: " .. destination, 4)
         return false, "Failed to open destination file"
     end
     
@@ -119,6 +126,8 @@ local function copyFile(source, destination)
         if not destinationFile:write(chunk) then
             sourceFile:close()
             destinationFile:close()
+			
+			cp("    Unable to write data to file: " .. destination, 4)
             return false, "Failed to write to destination file"
         end
     end
@@ -191,6 +200,7 @@ local function getAllDirectories(directory)
 end
 
 local pretty_format_json_string = function(jsonString)
+	cp("Formatting JSON data for readability. To improve performance, disable this in the config!", 3)
 	local total_required = string.len(jsonString)
 	local interval = tonumber(config.progress_interval) or 10
 	local progress = 0
@@ -204,7 +214,7 @@ local pretty_format_json_string = function(jsonString)
 		if progress ~= last_update then
 			last_update = progress
 			if (progress % interval == 0) then
-				cp("encoding progress: " .. tostring(progress) .. "%", 1)
+				cp("	formatting progress: " .. tostring(progress) .. "%", 1)
 			end
 		end
 		
@@ -222,6 +232,8 @@ local pretty_format_json_string = function(jsonString)
             formattedJson = formattedJson .. char
         end
     end
+	
+	cp("Reformatting complete!", 1)
 
     return formattedJson
 end
@@ -242,6 +254,9 @@ end
 local modlist = {
 	updated = os.date(),
 	mods = {},
+	index_table = {
+		['NO_DATA'] = ".\\no_index.txt",
+	},
 }
 --load modlist.json
 if lfs.attributes("modlist.json", "mode") == "file" then
@@ -250,7 +265,7 @@ if lfs.attributes("modlist.json", "mode") == "file" then
 	cp("modlist loaded successfully", 2)
 else
 	save_structure("modlist.json", modlist)
-	cp("modlist not found! Empty modlist created!", 3)
+	cp("modlist not found! Empty modlist created! Use -scan to update!", 3)
 end
 
 --The masterlist is a table representation of the game files
@@ -265,16 +280,6 @@ else
 	cp("Masterlist not found! Please run -update !", 3)
 	config.make_json_pretty = "NO"
 end
-
-
-
-
-
-
-
-
-
-
 
 
 local argstring = ""
@@ -299,49 +304,6 @@ local arg_priority = {
 	['-deploy']	=	1000,
 }
 
---[[
-Args: 
-	fpxcmd triggers execution based on its command line arguments.
-	Arguments (and their data) are added to the arg_queue in order of priority.
-	the priority system ensures all commands execute based on user's present config
-	
-	terminal arguments are first turned into argstring.
-	
-	argstring is then parsed for -<commands> that are also in arg_priority, and the results are saved to argtable as {"-command", "arguments"} pairs.
-	
-	argtable is then parsed for -file commands. if any are found, the files are parsed as strings and added to the end of argtable. file paths are tracked to prevent redundant loops
-	
-	the argument queue is a sorted argtable 
-	
-
--file <file>
-	(immediately) loads the given file as a string of arguments and adds them to the queue. Useful when fpxcmd is called from an external mod manager and has a LOT of commands to pass. 
-
--set option, value
-	Sets a config option to the value.
-
--remove
-	currently dumps the master copy back into the original directory.
-	Eventually it will use a file map to only dump changed files instead
-
--update
-	Copy the current fate directory and use it as the 'master'
-	the old master will be moved to /orig/backup/<today's date>
-
--scan
-	Update the modlist.json, which is loaded on application start.
-	
--flag modname modversion status
-	enables or disables the specified mod
-
--deploy
-	parse the patch.json files of enabled mods, build a file queue and push it to the game directory
-	
--index name FATE_path
-	sets the file at FATE_path to have the patch name of 'name'. Creates the file if it doesn't exist.
-	
-]]--
-
 --read an argstring and return as an argtable {{-function1 arg1 arg2}{-function2}...}
 local function parse_arguments(input)
     local arguments = {}
@@ -353,7 +315,7 @@ local function parse_arguments(input)
 	
     for part in input:gmatch("%S+") do
 		
-		cp("processing " .. part)
+		cp("processing " .. part, 1)
 		
 		if part:sub(1, 1) == "-" then
             -- If we encounter a new function, store the previous one if exists
@@ -831,19 +793,6 @@ for index, func_object in ipairs(argtable) do
 		end
 	end
 end
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 
 
