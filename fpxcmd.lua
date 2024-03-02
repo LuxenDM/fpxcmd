@@ -68,6 +68,9 @@ end
 
 if lfs.attributes(config.FateLocation .. "\\fate.exe", "mode") == "file" then
 	cp("Fate directory identified successfully at " .. config.FateLocation, 2)
+elseif lfs.attributes(".\\fate.exe", "mode") == "file" then
+	cp("Fate directory not configured, but the active directory appears to be the game directory (yay!); applying this now!", 2)
+	config.FateLocation = ".\\"
 else
 	cp("Fate directory not configured properly! Either modify the directory manually in config.ini or use '-set FateLocation <path\\to\\FATE>'", 4)
 end
@@ -244,6 +247,10 @@ local save_structure = function(dir, struct)
 		modstring = pretty_format_json_string(modstring)
 	end
 	writeFile(dir, modstring)
+end
+
+local strip_path_from_file = function(path)
+	return path:match(".+\\([^\\]+)$")
 end
 
 
@@ -447,7 +454,7 @@ queue_funcs = {
 		]]--
 		local new_index = obj[2]
 		local index_path = obj[3]
-		cp("new index: " .. new_index .. " >> " .. index_path)
+		cp("new index: " .. new_index .. " >> " .. index_path, 2)
 		modlist.index_table[new_index] = index_path
 	end,
 	['-set'] = function(obj)
@@ -635,18 +642,6 @@ queue_funcs = {
 		
 		local new_modlist_lookup = create_lookup(new_modlist.mods)
 		
-		--find mods NOT in the new list and mark for removal
-		--[[ unnecessary functionality, this is handled automatically in -deploy
-		for index_key, mod_obj in ipairs(modlist.mods) do
-			local mod_obj2 = find_mod(mod_obj.name, mod_obj.version, new_modlist_lookup)
-			if not mod_obj2 then
-				cp("didn't find " .. mod_obj.name .. " v" .. mod_obj.version .. " in the new list; marking for removal and adding", 1)
-				mod_obj.remove = "YES"
-				table.insert(new_modlist.mods, mod_obj)
-			end
-		end
-		]]--
-		
 		cp("New modlist has been generated!", 2)
 		modlist = new_modlist
 		modlist_lookup = new_modlist_lookup
@@ -703,7 +698,7 @@ queue_funcs = {
 				for _, folder_table in ipairs(patch_data.copy or {}) do
 					local destination_folder = folder_table.folder .. "\\"
 					for _, outfile in ipairs(folder_table.content) do
-						copy_list[destination_folder .. outfile] = mod_folder .. "\\" .. outfile
+						copy_list[destination_folder .. (strip_path_from_file(outfile) or outfile)] = mod_folder .. "\\" .. outfile
 					end
 				end
 				
@@ -717,7 +712,7 @@ queue_funcs = {
 			end
 		end
 		
-		cp("mod data collated; identifying reversions...")
+		cp("mod data collated; identifying reversions...", 1)
 		
 		--we have lists that tell what need to be done, but old files need to be identified and reverted. first, all indexed files not already in patch are added to it. these ensure untouched files are restored.
 		
@@ -765,7 +760,7 @@ queue_funcs = {
 			end
 		end
 		
-		cp("Patch step: Adding additional content to existing data files")
+		cp("Patch step: Adding additional content to existing data files", 1)
 		
 		for destination_index, patch_table in pairs(patch_list) do
 			cp("PATCH " .. destination_index, 2)
@@ -781,7 +776,7 @@ queue_funcs = {
 			writeFile(config.FateLocation .. "\\" .. destination_file, open_file)
 		end
 		
-		cp("Complete?")
+		cp("Deployment Complete!", 1)
 	end,
 }
 
