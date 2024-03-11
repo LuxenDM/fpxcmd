@@ -7,7 +7,7 @@ local json = dofile("rxi_json.lua")
 
 
 local fpx_dir = lfs.currentdir()
-local fpx_log = "fpxcmd v1.0.1, made by Luxen De'Mark (2024)\n    operating out of " .. fpx_dir .. "\n"
+local fpx_log = "fpxcmd v1.0.3, made by Luxen De'Mark (2024)\n    operating out of " .. fpx_dir .. "\n"
 print(fpx_log)
 
 local config = {
@@ -66,13 +66,17 @@ else
 	ini.save("config.ini", {config=config})
 end
 
-if lfs.attributes(config.FateLocation .. "\\fate.exe", "mode") == "file" then
-	cp("Fate directory identified successfully at " .. config.FateLocation, 2)
-elseif lfs.attributes(".\\fate.exe", "mode") == "file" then
-	cp("Fate directory not configured, but the active directory appears to be the game directory (yay!); applying this now!", 2)
-	config.FateLocation = ".\\"
+if config.skip_validity_check ~= "YES" then
+	if lfs.attributes(config.FateLocation .. "\\fate.exe", "mode") == "file" then
+		cp("Fate directory identified successfully at " .. config.FateLocation, 2)
+	elseif lfs.attributes(".\\fate.exe", "mode") == "file" then
+		cp("Fate directory not configured, but the active directory appears to be the game directory (yay!); applying this now!", 2)
+		config.FateLocation = ".\\"
+	else
+		cp("Fate directory not configured properly! Either modify the directory manually in config.ini or use '-set FateLocation <path\\to\\FATE>'", 4)
+	end
 else
-	cp("Fate directory not configured properly! Either modify the directory manually in config.ini or use '-set FateLocation <path\\to\\FATE>'", 4)
+	cp("Fate directory validity check was skipped!", 3)
 end
 
 if not lfs.attributes(".\\mods", "mode") == "directory" then
@@ -689,8 +693,9 @@ queue_funcs = {
 				local patch_str = readFile(mod_obj.patch)
 				local patch_data = json.decode(patch_str)
 				
-				for new_index, file_to_index in ipairs(patch_data.index or {}) do
+				for new_index, file_to_index in pairs(patch_data.index or {}) do
 					if not modlist.index_table[new_index] then
+						cp("	Mod creating index " .. new_index .. " to file " .. file_to_index, 1)
 						modlist.index_table[new_index] = file_to_index
 					end
 				end
