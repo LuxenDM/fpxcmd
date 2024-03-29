@@ -7,7 +7,7 @@ local json = dofile("rxi_json.lua")
 
 
 local fpx_dir = lfs.currentdir()
-local fpx_log = "fpxcmd v1.0.3, made by Luxen De'Mark (2024)\n    operating out of " .. fpx_dir .. "\n"
+local fpx_log = "fpxcmd v1.0.7, made by Luxen De'Mark (2024)\n    operating out of " .. fpx_dir .. "\n"
 print(fpx_log)
 
 local config = {
@@ -17,6 +17,7 @@ local config = {
 	make_json_pretty = "NO", --very slow! Makes json files human-readable by adding whitespacing
 	progress_interval = "10", --update interval on pretty-formatting json
 	allow_overwrite = "NO", --update will overwrite existing files, only enable for debugging!
+	skip_validity_check = "NO", --skip checking for fate.exe in destination directory.
 }
 
 local levels = {
@@ -97,7 +98,67 @@ local function readFile(filePath)
     return content
 end
 
+local function createDirectories(folderPath)
+	local currentPath = ""
+	for segment in folderPath:gmatch("([^/\\]+)[/\\]?") do
+		currentPath = currentPath .. segment .. "/"
+		local success, err = lfs.mkdir(currentPath)
+		if err == "File exists" then
+			--ignore errors for directories already existing
+		elseif not success then
+			return false, err
+			-- Return false if mkdir fails for any other reason
+		end
+	end
+	return true
+end
+
+local function createFolderPath(filePath)
+    -- Extract directory path from the file path
+    local folderPath = filePath:match("(.+)[/\\].-$")
+    if not folderPath then
+        -- No directory in the path, return
+        return true
+    end
+
+    -- Create missing directory path recursively
+    local success, err = createDirectories(folderPath)
+    if not success then
+        cp("    Unable to create folder: " .. folderPath .. " from file " .. filePath .. "\nError:\n\t" .. err, 4)
+        return false, err
+    end
+
+    return true
+end
+
+local function removeDirectory(path)
+	for file in lfs.dir(path) do
+		if file ~= "." and file ~= ".." then
+			local filePath = path .. "/" .. file
+			local attributes = lfs.attributes(filePath)
+			if attributes.mode == "directory" then
+				removeDirectory(filePath)
+			else
+				local success, error_msg = os.remove(filePath)
+				if not success then
+					return false, "Failed to delete file: " .. filePath .. ". Error: " .. error_msg
+				end
+			end
+		end
+	end
+	local success, error_msg = lfs.rmdir(path)
+	if not success then
+		return false, "Failed to delete directory: " .. path .. ". Error: " .. error_msg
+	end
+	return true
+end
+
 local function writeFile(filePath, contents)
+	local success, err = createFolderPath(filePath)
+	if not success then
+		return false
+	end
+	
 	local file = io.open(filePath, "w")
 	
 	if not file then
@@ -110,7 +171,19 @@ local function writeFile(filePath, contents)
 	cp("Wrote to " .. filePath, 1)
 end
 
+local copyFolder
 local function copyFile(source, destination)
+	local success, err = createFolderPath(destination)
+	if not success then
+		return false
+	end
+	
+	if lfs.attributes(source, "mode") == "directory" then
+		cp("	directory copying...", 1)
+		copyFolder(source, destination)
+		return
+	end
+	
 	cp("Copying " .. source .. " to " .. destination, 1)
     local sourceFile = io.open(source, "rb")
     if not sourceFile then
@@ -145,7 +218,7 @@ local function copyFile(source, destination)
     return true
 end
 
-local function copyFolder(source, destination, structure)
+function copyFolder(source, destination, structure)
     -- Create the destination directory if it doesn't exist
     lfs.mkdir(destination)
 
@@ -257,6 +330,18 @@ local strip_path_from_file = function(path)
 	return path:match(".+\\([^\\]+)$")
 end
 
+local read_json = function(json_data)
+	local status, err = pcall(function(path)
+		return json.decode(path)
+	end, json_data)
+	
+	if not status then
+		return false
+	end
+	
+	return err
+end
+
 
 
 
@@ -272,7 +357,7 @@ local modlist = {
 --load modlist.json
 if lfs.attributes("modlist.json", "mode") == "file" then
 	local modstring = readFile("modlist.json")
-	modlist = json.decode(modstring)
+	modlist = read_json(modstring)
 	cp("modlist loaded successfully", 2)
 else
 	save_structure("modlist.json", modlist)
@@ -285,7 +370,7 @@ local masterlist = {}
 
 if lfs.attributes(".\\master\\map.json", "mode") == "file" then
 	local mlstring = readFile(".\\master\\map.json")
-	masterlist = json.decode(mlstring)
+	masterlist = read_json(mlstring)
 	cp("Masterlist loaded successfully", 2)
 else
 	cp("Masterlist not found! Please run -update !", 3)
@@ -615,33 +700,39 @@ queue_funcs = {
 				SPELLS_ES = "SPELLS\\es\\spells.dat",
 				SPELLS_FR = "SPELLS\\fr\\spells.dat",
 				SPELLS_IT = "SPELLS\\it\\spells.dat",
+				
+				TEMPLATES_MASTER = "TEMPLATES\\manifest.dat",
 			},
 		}
 		
 		for _, folder in ipairs(patch_files) do
 			local patch = folder .. "\\patch.json"
 			local json_data = readFile(patch)
-			local patch_data = json.decode(json_data)
-			
-			local mod_name = patch_data.name
-			local mod_version = patch_data.version
-			
-			--find in current modlist, get current state
-			local state = config.external_manager or "NO"
-			local index = find_mod(mod_name, mod_version)
-			if index then
-				state = modlist.mods[index].enabled
+			local patch_data = read_json(json_data)
+			if not patch_data then
+				cp("Unable to open json data at " .. patch, 4)
+			else
+				
+				local mod_name = patch_data.name
+				local mod_version = patch_data.version
+				
+				--find in current modlist, get current state
+				local state = config.external_manager or "NO"
+				local index = find_mod(mod_name, mod_version)
+				if index then
+					state = modlist.mods[index].enabled
+				end
+				
+				local mod_data = {
+					folder = folder,
+					patch = patch,
+					name = mod_name,
+					version = mod_version,
+					enabled = state,
+				}
+				
+				table.insert(new_modlist.mods, mod_data)
 			end
-			
-			local mod_data = {
-				folder = folder,
-				patch = patch,
-				name = mod_name,
-				version = mod_version,
-				enabled = state,
-			}
-			
-			table.insert(new_modlist.mods, mod_data)
 		end
 		
 		local new_modlist_lookup = create_lookup(new_modlist.mods)
@@ -691,7 +782,7 @@ queue_funcs = {
 				cp("Fetching mod " .. mod_obj.name .. " v" .. mod_obj.version, 1)
 				local mod_folder = mod_obj.folder
 				local patch_str = readFile(mod_obj.patch)
-				local patch_data = json.decode(patch_str)
+				local patch_data = read_json(patch_str)
 				
 				for new_index, file_to_index in pairs(patch_data.index or {}) do
 					if not modlist.index_table[new_index] then
@@ -727,7 +818,7 @@ queue_funcs = {
 		
 		--get last_edited file list to find files to revert/remove
 		local efstring = readFile(".\\master\\edited.json") or "{}"
-		local edited_files = json.decode(efstring)
+		local edited_files = read_json(efstring)
 		
 		--compare to copy_list's keys to find files we need to revert/remove
 		for changed_file, source in pairs(edited_files) do
@@ -754,8 +845,18 @@ queue_funcs = {
 				if master_ver_exists then
 					source_file = ".\\master\\" .. destination_file
 				else
-					cp("DELETE " .. destination_file, 2)
-					os.remove(config.FateLocation .. "\\" .. destination_file)
+					local is_dir = lfs.attributes(destination_file, "mode") == "directory"
+					if is_dir then
+						cp("DELETE DIRECTORY " .. destination_file, 2)
+						removeDirectory(destination_file)
+					else
+						cp("DELETE FILE " .. destination_file, 2)
+						local status, err = os.remove(config.FateLocation .. "\\" .. destination_file)
+						if not success then
+							cp("	Failed to delete file: " .. err, 4)
+						end
+					end
+					
 					skip_this_file = true
 				end
 			end
