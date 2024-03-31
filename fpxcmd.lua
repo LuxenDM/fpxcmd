@@ -1,5 +1,7 @@
 --fpxcmd.lua
 
+local timestat_start = os.time()
+
 local lfs = require("lfs")
 local ini = dofile("inifile.lua")
 local json = dofile("rxi_json.lua")
@@ -904,6 +906,8 @@ ini.save("config.ini", {config=config})
 
 --save the modlist
 save_structure("modlist.json", modlist)
+
+cp("Finished in " .. tostring(os.time() - timestat_start) .. " seconds")
 
 --save the message log for debugging
 writeFile("errors.log", fpx_log)
