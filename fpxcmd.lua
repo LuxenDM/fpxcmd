@@ -458,12 +458,20 @@ end
 --parse arg
 local arg_priority = {
 	['-file']	=	1, --these get skipped during the priority execution, as they're handled before then
+	
 	['-set']	=	100,
+	
 	['-remove']	=	200,
+	
 	['-update']	=	300,
+	
 	['-scan']	=	400,
+	
+	['-flagall']=	490,
 	['-flag']	=	500,
+	
 	['-index']	=	700,
+	
 	['-deploy']	=	1000,
 }
 
@@ -807,6 +815,13 @@ queue_funcs = {
 		cp("New modlist has been generated!", 2)
 		modlist = new_modlist
 		modlist_lookup = new_modlist_lookup
+	end,
+	['-flagall'] = function(obj)
+		local new_status = obj[2]
+		cp("Changing status of all mods to " .. new_status, 2)
+		for index, details in ipairs(modlist.mods) do
+			modlist.mods[index].enabled = new_status
+		end
 	end,
 	['-flag'] = function(obj)
 		local modname = obj[2]
