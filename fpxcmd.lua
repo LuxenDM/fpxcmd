@@ -344,6 +344,71 @@ local read_json = function(json_data)
 	return err
 end
 
+--contains sandbox for mods with custom modifiers
+local sandbox = {}
+	sandbox.console_print = cp
+	sandbox.spickle = spickle
+	sandbox.os = {
+		time = os.time,
+		date = os.date,
+	}
+	sandbox.print = function(...)
+		args = {...}
+		cp(args[1], 2)
+	end
+	sandbox.string = string
+	sandbox.math = math
+	sandbox.table = table
+	sandbox.ipairs = ipairs
+	sandbox.pairs = pairs
+	sandbox.next = next
+	sandbox.tonumber = tonumber
+	sandbox.tostring = tostring
+	sandbox.unpack = unpack
+	sandbox.rawget = rawget
+	sandbox.rawset = rawset
+	sandbox.rawequal = rawequal
+	sandbox.type = type
+	sandbox.pcall = pcall
+	sandbox.xpcall = xpcall
+	sandbox.assert = assert
+	sandbox.error = error
+	sandbox.select = select
+	sandbox.coroutine = coroutine
+	sandbox._sandbox = sandbox
+	sandbox.user_config = config
+	sandbox.modlist = modlist
+	
+	--current directory is fpx_dir
+	sandbox.load = function(func, chunkname)
+		local f, err = load(func, chunkname)
+		if f then
+			setfenv(f, sandbox)
+		end
+		return f, err
+	end
+	
+	sandbox.loadstring = sandbox.load
+	
+	sandbox.loadfile = function(luafile)
+		local f, err = loadfile(fpx_dir "/mods/" .. tostring(luafile))
+		if f then
+			setfenv(f, sandbox)
+		end
+		return f, err
+	end
+	
+	sandbox.dofile = function(luafile)
+		sandbox.loadfile(luafile)()
+	end
+	
+	sandbox.require = function() end
+	
+--sandbox complete
+	
+	
+	
+
 
 
 
@@ -769,13 +834,25 @@ queue_funcs = {
 		
 		local patch_list = {
 			--[[
-			file_to_patch = {
+			index_to_patch = {
 				mod_file,
 				mod_file,
 				mod_file,
 			},
 			...
 			series of patches applied to singular file
+			]]--
+		}
+		
+		local exec_list = {
+			[1] = false,
+			--[[
+			index_to_patch = {
+				mod_lua,
+				mod_lua,
+				...
+			}
+			...
 			]]--
 		}
 		
@@ -806,6 +883,14 @@ queue_funcs = {
 					for _, ap_content in ipairs(ap_table.content) do
 						table.insert(patch_list[destination_file], mod_folder .. "\\" .. ap_content)
 					end
+				end
+				
+				for _, script_table in ipairs(patch_data.script or {}) do
+					exec_list[1] = true
+					local destination_file = script_table.container
+					local script_file = script_table.file
+					exec_list[destination_file] = exec_list[destination_file] or {}
+					table.insert(exec_list[destination_file],  mod_folder .. "\\" .. script_file)
 				end
 			end
 		end
@@ -838,7 +923,7 @@ queue_funcs = {
 			patch_list - files to directly edit
 		]]--
 		
-		cp("Copy step: Adding new asset files to the game", 1)
+		cp("Copy step: Adding new asset files to the game", 2)
 		
 		for destination_file, source_file in pairs(copy_list) do
 			local skip_this_file = false
@@ -868,7 +953,7 @@ queue_funcs = {
 			end
 		end
 		
-		cp("Patch step: Adding additional content to existing data files", 1)
+		cp("Patch step: Adding additional content to existing data files", 2)
 		
 		for destination_index, patch_table in pairs(patch_list) do
 			cp("PATCH " .. destination_index, 2)
@@ -882,6 +967,52 @@ queue_funcs = {
 			end
 			
 			writeFile(config.FateLocation .. "\\" .. destination_file, open_file)
+		end
+		
+		if exec_list[1] then
+			exec_list[1] = nil
+			cp("Script step: Applying script filters...", 2)
+			
+			for destination_index, script_list in pairs(exec_list) do
+				local destination_file = modlist.index_table[destination_index] or "no_index.txt"
+				local open_file = readFile(".\\" .. destination_file) or ""
+				
+				cp("	" .. destination_index .. ": ", 1)
+				for _, script_to_apply in ipairs(script_list) do
+					cp("		" .. script_to_apply, 1)
+					local last_good_state = open_file
+					
+					local status, data, data2 = pcall(function(script, cur_file)
+						local f, err = loadfile(script)
+						if f then
+							setfenv(f, sandbox)
+							local data = f(cur_file)
+							if type(data) == "string" then
+								--returned content, save as new file data
+								return data
+							else
+								--returned invalid (not empty string) so, ignore file
+								return cur_file
+							end
+						else
+							return false, tostring(err)
+						end
+					end, script_to_apply, last_good_state)
+					
+					if not status then
+						cp("			error during execution! " .. script_to_apply, 3)
+						cp("			" .. tostring(data), 3)
+					elseif not data then
+						cp("			error while loading file! " .. script_to_apply, 3)
+						cp("			" .. tostring(data), 3)
+					else
+						open_file = data
+					end
+				end
+				
+				writeFile(config.FateLocation .. "\\" .. destination_file, open_file)
+			end
+			
 		end
 		
 		cp("Deployment Complete!", 1)
