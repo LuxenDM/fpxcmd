@@ -859,6 +859,13 @@ queue_funcs = {
 			]]--
 		}
 		
+		local overrides = {
+			--[[
+			index_to_override = true,
+			...
+			]]--
+		}
+		
 		local exec_list = {
 			[1] = false,
 			--[[
@@ -896,6 +903,14 @@ queue_funcs = {
 					if not modlist.index_table[new_index] then
 						cp("	Mod creating index " .. new_index .. " to file " .. file_to_index, 1)
 						modlist.index_table[new_index] = file_to_index
+					end
+				end
+				
+				for _, index_to_override in ipairs(patch_data.override or {}) do
+					local index_file = modlist.index_table[index_to_override]
+					if index_file then
+						cp("	Overriding " .. index_to_override .. "; existing file will be used", 2)
+						overrides[index_to_override] = true
 					end
 				end
 				
@@ -999,7 +1014,14 @@ queue_funcs = {
 		for destination_index, patch_table in pairs(patch_list) do
 			cp("PATCH " .. destination_index, 2)
 			local destination_file = modlist.index_table[destination_index] or "no_index.txt"
-			local open_file = readFile(".\\master\\" .. destination_file) or ""
+			local open_file = ""
+			if overrides[destination_index] then
+				cp("	/current copy of file/", 1)
+				open_file = readFile(".\\" .. destination_file) or ""
+			else
+				cp("	/master copy of file/", 1)
+				open_file = readFile(".\\master\\" .. destination_file) or ""
+			end
 			
 			for _, patch_to_apply in ipairs(patch_table) do
 				cp("	+" .. patch_to_apply, 2)
