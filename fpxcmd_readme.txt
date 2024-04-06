@@ -27,6 +27,9 @@ These are arguments you provide in the command line when calling fpxcmd. individ
 -scan
 	Search the /mods folder for mods and rebuild the modlist. Use after adding new mods or removing any. Any new mods found are disabled by default unless "external_manager=YES" in the configuration.
 	
+-flagall <YES or NO>
+	changes the 'enabled' state of all mods. Only mods that are enabled are deployed.
+	
 -flag <mod name> <mod version> <YES or NO>
 	changes the 'enabled' state of the specified mod. Only enabled mods are deployed. 
 	
@@ -56,6 +59,8 @@ master_made: Tracks if the master copy has been made. Also needs to be set to "N
 
 debug: A number 1-4, related to message filtering. default is 2. Messages with a lower priority than this number are hidden in the command line interface (they still appear in errors.log)
 
+external_manager: YES or NO, set YES if you are using vortex or another mod manager to handle your mods, or simply want to default new mods to an enabled state.
+
 
 
 modlist.json
@@ -66,7 +71,7 @@ Created by the -scan command, this stores all known mods and their current state
 
 edited.json
 ================================================================================
-Created during -deploy, this is a list of all files that were added or edited by the COPY process. This file is used to revert changes when a file is no longer being modified. This file is stored in the \master folder.
+Created during -deploy, this is a list of all files that were added or edited by the COPY process or the similar SEQCOPY process. This file is used to revert changes when a file is no longer being modified. This file is stored in the \master folder.
 
 
 
