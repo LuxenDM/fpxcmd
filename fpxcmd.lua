@@ -871,6 +871,20 @@ queue_funcs = {
 			]]--
 		}
 		
+		local seq_list = {
+			[1] = false,
+			--[[
+			result_file = {
+				result_directory = ".\\MUSIC", (set by first instance)
+				"mod_file",
+				"mod_file",
+				"mod_file",
+				...
+			},
+			...
+			]]--
+		}
+		
 		for _, mod_obj in ipairs(modlist.mods) do
 			if mod_obj.enabled == "YES" then
 				cp("Fetching mod " .. mod_obj.name .. " v" .. mod_obj.version, 1)
@@ -897,6 +911,18 @@ queue_funcs = {
 					patch_list[destination_file] = patch_list[destination_file] or {}
 					for _, ap_content in ipairs(ap_table.content) do
 						table.insert(patch_list[destination_file], mod_folder .. "\\" .. ap_content)
+					end
+				end
+				
+				for _, seq_table in ipairs(patch_data.sequence or {}) do
+					seq_list[1] = true
+					local result_file = seq_table.file or "unknown?.dat"
+					local result_dir = seq_table.folder or "INVALID"
+					seq_list[result_file] = seq_list[result_file] or {
+						result_directory = result_dir,
+					}
+					for index, seq_file in ipairs(seq_table.content) do
+						table.insert(seq_list[result_file], mod_folder .. "\\" .. seq_file)
 					end
 				end
 				
@@ -954,8 +980,8 @@ queue_funcs = {
 					else
 						cp("DELETE FILE " .. destination_file, 2)
 						local status, err = os.remove(config.FateLocation .. "\\" .. destination_file)
-						if not success then
-							cp("	Failed to delete file: " .. err, 4)
+						if not status then
+							cp("	Failed to delete file: " .. tostring(err), 4)
 						end
 					end
 					
@@ -982,6 +1008,44 @@ queue_funcs = {
 			end
 			
 			writeFile(config.FateLocation .. "\\" .. destination_file, open_file)
+		end
+		
+		if seq_list[1] then
+			seq_list[1] = nil
+			cp("Sequence-Copy step: Ordering media file sequences...", 2)
+			--add every new seq file to copy_list and re-save it
+			
+			for seq_file, seq_data in pairs(seq_list) do
+				local seq_destination = seq_data.result_directory
+				local target_destination_path = config.FateLocation .. "\\" .. seq_destination
+				local master_destination_path = config.FateLocation .. "\\master\\" .. seq_destination
+				local start_index = 0 --number of originals in master
+				
+				--convert media?.ext to %media%d%.ext
+				local search_pattern = seq_file:gsub("%%", "%%%%"):gsub("%?", "%%d")
+				
+				--find number of existing files
+				for file_obj in lfs.dir(master_destination_path) do
+					if (file_obj:match(search_pattern)) and (lfs.attributes(master_destination_path .. "\\" .. file_obj, "mode") == "file") then
+						start_index = start_index + 1
+					end
+				end
+				
+				cp("	Sequencing " .. seq_file .. " starting from index " .. tostring(start_index), 2)
+				
+				--loop: increment index, open media, copy to destination with new name
+				for _, media_obj in ipairs(seq_data) do
+					start_index = start_index + 1
+					local filename = seq_file:gsub("?", tostring(start_index))
+					copy_list[seq_destination .. "\\" .. filename] = "DELETE_ME" --always remove, music will be reordered every time
+					--this ensures the music is never accidentally duplicated
+					
+					cp("SEQCOPY " .. media_obj .. " to " .. filename, 2)
+					copyFile(".\\" .. media_obj, target_destination_path .. "\\" .. filename)
+				end
+			end
+			save_structure(".\\master\\edited.json", copy_list)
+				--resave this because sequence files were added
 		end
 		
 		if exec_list[1] then
