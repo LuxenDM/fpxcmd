@@ -9,7 +9,7 @@ local json = dofile("rxi_json.lua")
 
 
 local fpx_dir = lfs.currentdir()
-local fpx_log = "fpxcmd v1.0.7, made by Luxen De'Mark (2024)\n    operating out of " .. fpx_dir .. "\n"
+local fpx_log = "fpxcmd v1.1.0, made by Luxen De'Mark (2024)\n    operating out of " .. fpx_dir .. "\n"
 print(fpx_log)
 
 local config = {
@@ -84,6 +84,61 @@ end
 
 if not lfs.attributes(".\\mods", "mode") == "directory" then
     lfs.mkdir(".\\mods")
+end
+
+function get_whole_ver(semverstr)
+	--from Vendetta Online Neoloader project
+	if type(semverstr) ~= "string" then
+		cp("Tried interpreting a version string, but the data was of type " .. type(semverstr), 1)
+		return false
+	end
+
+    local ver_str, meta_str = semverstr:match("^([^%+%-]+)(.*)$")
+	if not ver_str then
+		ver_str = ""
+	end
+    local ver_table = {}
+    for num in ver_str:gmatch("%d+") do
+        table.insert(ver_table, tonumber(num))
+    end
+
+    if #ver_table < 1 then
+        ver_table = {0}
+    end
+
+    local ret_table = {ver_table, meta_str}
+    return ret_table
+end
+
+function compare_sem_ver(obj1, obj2)
+	--from Vendetta Online Neoloader project
+    local ot1 = get_whole_ver(obj1)
+    local ot2 = get_whole_ver(obj2)
+
+    if not ot1 or not ot2 then
+        return false
+    end
+
+    local ver1, meta1 = ot1[1], ot1[2]
+    local ver2, meta2 = ot2[1], ot2[2]
+
+    for i = 1, math.max(#ver1, #ver2) do
+        local n1 = ver1[i] or 0
+		local n2 = ver2[i] or 0
+		if n1 ~= n2 then
+            return n1 < n2 and -1 or 1
+        end
+    end
+
+    if meta1 == "" and meta2 == "" then
+        return 0  --obj1 is equal to obj2
+    elseif meta1 == "" then
+        return -1 --obj1 is less than obj2
+    elseif meta2 == "" then
+        return 1  --obj1 is greater than obj2
+    else
+        return meta1 < meta2 and -1 or 1
+    end
 end
 
 local function readFile(filePath)
@@ -838,6 +893,58 @@ queue_funcs = {
 	['-deploy'] = function()
 		cp("building lists defining the current state", 2)
 		
+		cp("Checking for dependencies...", 2)
+		for _, mod_obj in ipairs(modlist.mods) do
+			--checking mods' requirements. if unfulfilled, mark enabled="NO"
+			mod_obj.skip = nil --removing any old skips; always recheck
+			
+			local patch_str = readFile(mod_obj.patch)
+			local patch_data = read_json(patch_str)
+			
+			local req_table = patch_data.requires
+			local valid = false
+			local found_above_min = false
+			local found_below_max = false
+			
+			if req_table then
+				cp("	" .. mod_obj.name .. " has dependencies!", 2)
+				for req_index, req_data in ipairs(req_table) do
+					local req_name = req_data.name
+					local min_ver = req_data.above_version
+					local max_ver = req_data.below_version
+					
+					cp("		requires " .. req_name .. " >v" .. min_ver .. " and <v" .. max_ver, 1)
+					
+					local all_vers = modlist_lookup[req_name]
+					if not all_vers then
+						break
+					end
+					
+					valid = true
+					
+					for version, mod_index in pairs(all_vers) do
+						if modlist.mods[mod_index].enabled == "YES" then
+							local above_min = compare_sem_ver(version, min_ver) --want to be >0
+							local below_max = compare_sem_ver(version, max_ver) --want to be <0
+							
+							if (above_min > 0) and (below_max < 0) then
+								found_above_min = true
+								found_below_max = true
+								cp("		satisfied by v" .. version, 2)
+							end
+						end
+					end
+					
+				end
+		
+				-- If any requirement is not met, mark the mod as disabled
+				if not valid or not (found_above_min and found_below_max) then
+					cp("		dependency was unfulfilled; " .. mod_obj.name .. " has been disabled for this session!", 3)
+					mod_obj.skip = "YES"
+				end
+			end
+		end
+		
 		local copy_list = {
 			--[[
 			destination_file = mod_source_file,
@@ -893,7 +1000,7 @@ queue_funcs = {
 		}
 		
 		for _, mod_obj in ipairs(modlist.mods) do
-			if mod_obj.enabled == "YES" then
+			if (mod_obj.enabled == "YES") and (not mod_obj.skip) then
 				cp("Fetching mod " .. mod_obj.name .. " v" .. mod_obj.version, 1)
 				local mod_folder = mod_obj.folder
 				local patch_str = readFile(mod_obj.patch)
