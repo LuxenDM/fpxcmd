@@ -9,7 +9,7 @@ local json = dofile("rxi_json.lua")
 
 
 local fpx_dir = lfs.currentdir()
-local fpx_log = "fpxcmd v1.1.0, made by Luxen De'Mark (2024)\n    operating out of " .. fpx_dir .. "\n"
+local fpx_log = os.date() .. " [INFO] fpxcmd v1.1.1, made by Luxen De'Mark (2024)\n    operating out of " .. fpx_dir .. "\n"
 print(fpx_log)
 
 local config = {
@@ -40,24 +40,41 @@ local cp = function(instr, level)
 end
 
 local spickle
-spickle = function(intable)
-	local retstr = ""
-	retstr = retstr .. "\n" .. tostring(intable) .. " {"
-	for k, v in pairs(intable) do
-		if type(v) == "table" then
-			retstr = retstr .. "\n" .. tostring(k) .. " >> "
-			if tostring(k) == "_G" or tostring(k) == "package" or tostring(k) == "iup" then
-				retstr = retstr .. "\n(Nope)"
-			else
-				retstr = retstr .. spickle(v)
-			end
-		else
-			retstr = retstr .. "\n" .. tostring(k) .. " >> " .. tostring(v)
-		end
-	end
-	retstr = retstr .. "\n}"
-	
-	return retstr
+
+spickle = function(intable, depth, visited)
+    depth = depth or 0
+    visited = visited or {}
+    local retstr = ""
+    local tabs = string.rep("   ", depth)
+    if visited[intable] then
+        return tabs .. tostring(intable) .. " (Circular reference)"
+    end
+    visited[intable] = true
+    retstr = retstr .. "\n" .. tabs .. tostring(intable) .. " {"
+    depth = depth + 1 -- Increase depth here
+    
+    -- Sorting keys alphabetically
+    local sortedKeys = {}
+    for k, _ in pairs(intable) do
+        table.insert(sortedKeys, k)
+    end
+    table.sort(sortedKeys, function(a, b) return tostring(a) < tostring(b) end)
+    
+    for _, k in ipairs(sortedKeys) do
+        local v = intable[k]
+        if type(v) == "table" then
+            retstr = retstr .. "\n" .. string.rep("   ", depth) .. tostring(k) .. " >> "
+            if tostring(k) == "_G" or tostring(k) == "package" or tostring(k) == "iup" then
+                retstr = retstr .. "\n" .. string.rep("   ", depth) .. "(Nope)"
+            else
+                retstr = retstr .. spickle(v, depth + 1, visited)
+            end
+        else
+            retstr = retstr .. "\n" .. string.rep("   ", depth) .. tostring(k) .. " >> " .. tostring(v)
+        end
+    end
+    retstr = retstr .. "\n" .. string.rep("   ", depth - 1) .. "}"
+    return retstr
 end
 
 if lfs.attributes("config.ini", "mode") == "file" then
@@ -76,7 +93,7 @@ if config.skip_validity_check ~= "YES" then
 		cp("Fate directory not configured, but the active directory appears to be the game directory (yay!); applying this now!", 2)
 		config.FateLocation = ".\\"
 	else
-		cp("Fate directory not configured properly! Either modify the directory manually in config.ini or use '-set FateLocation <path\\to\\FATE>'", 4)
+		cp("Fate directory not configured properly! Either modify the directory manually in config.ini, use '-set FateLocation <path\\to\\FATE>', or move this application to the fate directory itself!", 4)
 	end
 else
 	cp("Fate directory validity check was skipped!", 3)
@@ -156,19 +173,30 @@ local function readFile(filePath)
 end
 
 local function createDirectories(folderPath)
-	local currentPath = ""
-	for segment in folderPath:gmatch("([^/\\]+)[/\\]?") do
-		currentPath = currentPath .. segment .. "/"
-		local success, err = lfs.mkdir(currentPath)
-		if err == "File exists" then
-			--ignore errors for directories already existing
-		elseif not success then
-			return false, err
-			-- Return false if mkdir fails for any other reason
-		end
-	end
-	return true
+    local currentPath = ""
+    -- Check if the folderPath starts with a drive letter
+    local driveLetter = folderPath:match("^%a:")
+    if driveLetter then
+        -- Add the drive letter segment to the currentPath
+        currentPath = driveLetter
+        -- Remove the drive letter from the folderPath
+        folderPath = folderPath:sub(4)
+    end
+
+    -- Iterate over each segment in the folderPath
+    for segment in folderPath:gmatch("([^/\\]+)[/\\]?") do
+        currentPath = currentPath .. segment .. "/"
+        local success, err = lfs.mkdir(currentPath)
+        if err == "File exists" then
+            -- Ignore errors for directories already existing
+        elseif not success then
+            return false, err
+            -- Return false if mkdir fails for any other reason
+        end
+    end
+    return true
 end
+
 
 local function createFolderPath(filePath)
     -- Extract directory path from the file path
