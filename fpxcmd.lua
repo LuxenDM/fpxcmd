@@ -8,8 +8,7 @@ local json = dofile("rxi_json.lua")
 
 
 
-local fpx_dir = lfs.currentdir()
-local fpx_log = os.date() .. " [INFO] fpxcmd v1.1.1, made by Luxen De'Mark (2024)\n    operating out of " .. fpx_dir .. "\n"
+local fpx_log = os.date() .. " [INFO] fpxcmd v1.1.2, made by Luxen De'Mark (2024)\n    operating out of " .. fpx_dir .. "\n"
 print(fpx_log)
 
 local config = {
@@ -170,6 +169,16 @@ local function readFile(filePath)
     file:close()
 	
     return content
+end
+
+local function findLongestCommonSuffixPrefix(str1, str2)
+	local minLength = math.min(#str1, #str2)
+	for i = 0, minLength do
+		if str1:sub(-i) == str2:sub(1, i) then
+			return i
+		end
+	end
+	return 0
 end
 
 local function createDirectories(folderPath)
@@ -364,6 +373,42 @@ local function getAllDirectories(directory)
     return directories
 end
 
+local function getAllFiles(dir)
+	local files = {}
+
+	-- Helper function to recursively scan directories
+	local function scanDirectory(directory)
+		for file in lfs.dir(directory) do
+			if file ~= "." and file ~= ".." then
+				local filePath = directory .. "\\" .. file
+				local mode = lfs.attributes(filePath, "mode")
+				if mode == "file" then
+					table.insert(files, filePath)
+				elseif mode == "directory" then
+					scanDirectory(filePath)
+				end
+			end
+		end
+	end
+
+	-- Start scanning from the given directory
+	scanDirectory(dir)
+
+	return files
+end
+
+local function splitPath(filePath)
+	-- Find the last occurrence of the directory separator
+	local dir, file = filePath:match("^(.-)([^/\\]+)$")
+
+	-- If no separator is found, it means the file is in the current directory
+	if not dir or dir == "" then
+		dir = "."
+	end
+
+	return dir, file
+end
+
 local pretty_format_json_string = function(jsonString)
 	cp("Formatting JSON data for readability. To improve performance, disable this in the config!", 3)
 	local total_required = string.len(jsonString)
@@ -524,7 +569,8 @@ if lfs.attributes(".\\master\\map.json", "mode") == "file" then
 	cp("Masterlist loaded successfully", 2)
 else
 	cp("Masterlist not found! Please run -update !", 3)
-	config.make_json_pretty = "NO"
+	--disable formatting unless config.debug == 1 and the flag is already enabled
+	config.make_json_pretty = (tonumber(config.debug) > 1) and "NO" or config.make_json_pretty or "NO"
 end
 
 
@@ -1051,8 +1097,32 @@ queue_funcs = {
 				
 				for _, folder_table in ipairs(patch_data.copy or {}) do
 					local destination_folder = folder_table.folder .. "\\"
+					cp("Copy prestep: Destination: " .. destination_folder)
 					for _, outfile in ipairs(folder_table.content) do
-						copy_list[destination_folder .. (strip_path_from_file(outfile) or outfile)] = mod_folder .. "\\" .. outfile
+						--cp("	outfile: " .. outfile)
+						--cp("	mod_out: .\\" .. mod_folder .. "\\" .. outfile)
+						
+						local out_type = lfs.attributes(mod_folder .. "\\" .. outfile, "mode")
+						--cp("	out_type: " .. out_type)
+						
+						if out_type == "directory" then
+							local file_table = getAllFiles(mod_folder .. "\\" .. outfile)
+							--print(spickle(file_table))
+							for _, source_to_copy in ipairs(file_table) do
+								local seper_index = findLongestCommonSuffixPrefix(mod_folder .. "\\" .. outfile, source_to_copy)
+								--cp("		seperating at: " .. tostring(seper_index))
+								local source_to_use = source_to_copy:sub(seper_index + 2)
+								--cp("		seperation: " .. source_to_use)
+								
+								copy_list[destination_folder .. (strip_path_from_file(outfile) or outfile) .. "\\" .. source_to_use ] = mod_folder .. "\\" .. outfile .. "\\" .. source_to_use
+								
+								--cp("		result: ")
+								--cp("			destination: " .. destination_folder .. (strip_path_from_file(outfile) or outfile))
+								--cp("			pulled from: " .. mod_folder .. "\\" .. outfile .. "\\" .. source_to_use)
+							end
+						else
+							copy_list[destination_folder .. (strip_path_from_file(outfile) or outfile)] = mod_folder .. "\\" .. outfile
+						end
 					end
 				end
 				
@@ -1105,7 +1175,6 @@ queue_funcs = {
 			end
 		end
 		
-		save_structure(".\\master\\edited.json", copy_list)
 		save_structure(".\\master\\patched.json", patch_list)
 		
 		--all files are accounted for. time to begin application.
@@ -1119,10 +1188,17 @@ queue_funcs = {
 		for destination_file, source_file in pairs(copy_list) do
 			local skip_this_file = false
 			if source_file == "REMOVE" then
-				local master_ver_exists = lfs.attributes(".\\master\\" .. destination_file, "mode") == "file"
-				if master_ver_exists then
+				local valid_types = {
+					file = true,
+					directory = true,
+				}
+				local master_ver_type = lfs.attributes(".\\master\\" .. destination_file, "mode")
+				
+				if valid_types[master_ver_type] then
+					--source does exist in the master
 					source_file = ".\\master\\" .. destination_file
 				else
+					--source doesn't exist in master, delete file/directory
 					local is_dir = lfs.attributes(destination_file, "mode") == "directory"
 					if is_dir then
 						cp("DELETE DIRECTORY " .. destination_file, 2)
@@ -1143,6 +1219,8 @@ queue_funcs = {
 				copyFile(".\\" .. source_file, config.FateLocation .. "\\" .. destination_file)
 			end
 		end
+		
+		save_structure(".\\master\\edited.json", copy_list)
 		
 		cp("Patch step: Adding additional content to existing data files", 2)
 		
