@@ -13,7 +13,7 @@ local fpx_log = os.date() .. " [INFO] fpxcmd v1.1.1, made by Luxen De'Mark (2024
 print(fpx_log)
 
 local config = {
-	FateLocation = "C:\\SteamLibrary\\steamapps\\common\\FATE", --where the game is stored
+	FateLocation = ".\\", --where the game is stored
 	DataLocation = "C:\\ProgramData\\WildTangent\\FateSteam", --used by FatePatcher, not fpxcmd
 	debug = "2", --print log levels below this are not shown (still saved to log file)
 	make_json_pretty = "NO", --very slow! Makes json files human-readable by adding whitespacing
