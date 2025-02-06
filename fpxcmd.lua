@@ -8,12 +8,22 @@ local json = dofile("rxi_json.lua")
 
 
 
+--//////////////////////////////////////////////////////////////////////////////
+--
+--//////////////////////////////////////////////////////////////////////////////
+
+
+
+
+
 local fpx_dir = lfs.currentdir()
-local fpx_log = os.date() .. " [INFO] fpxcmd v1.1.1, made by Luxen De'Mark (2024)\n    operating out of " .. fpx_dir .. "\n"
+local fpx_log = os.date() .. " [INFO] fpxcmd v1.2.0, made by Luxen De'Mark (2024)\n    operating out of " .. fpx_dir .. "\n"
 print(fpx_log)
 
 local config = {
-	FateLocation = ".\\", --where the game is stored
+	FateLocation = "C:\\SteamLibrary\\steamapps\\common\\FATE", --where the game is stored
+	MasterDirectory = ".\\master",
+	ModsSourceDirectory = ".\\mods",
 	DataLocation = "C:\\ProgramData\\WildTangent\\FateSteam", --used by FatePatcher, not fpxcmd
 	debug = "2", --print log levels below this are not shown (still saved to log file)
 	make_json_pretty = "NO", --very slow! Makes json files human-readable by adding whitespacing
@@ -21,6 +31,19 @@ local config = {
 	allow_overwrite = "NO", --update will overwrite existing files, only enable for debugging!
 	skip_validity_check = "NO", --skip checking for fate.exe in destination directory.
 }
+
+-- Ensure paths use configured directories
+local function getGameFilePath(relativePath)
+    return config.FateLocation .. (relativePath and ("\\" .. relativePath) or "")
+end
+
+local function getMasterFilePath(relativePath)
+    return config.MasterDirectory .. (relativePath and ("\\" .. relativePath) or "")
+end
+
+local function getModFilePath(relativePath)
+    return config.ModsSourceDirectory .. (relativePath and ("\\" .. relativePath) or "")
+end
 
 local levels = {
 	[1] = "DEBUG",
@@ -87,20 +110,21 @@ else
 end
 
 if config.skip_validity_check ~= "YES" then
-	if lfs.attributes(config.FateLocation .. "\\fate.exe", "mode") == "file" then
+	if lfs.attributes(getGameFilePath("fate.exe"), "mode") == "file" then
 		cp("Fate directory identified successfully at " .. config.FateLocation, 2)
 	elseif lfs.attributes(".\\fate.exe", "mode") == "file" then
-		cp("Fate directory not configured, but the active directory appears to be the game directory (yay!); applying this now!", 2)
+		cp("Fate directory not configured, but the active directory appears to be the game directory; applying this now!", 2)
+		cp("IF YOU ARE PLAYING A GAME OTHER THAN THE ORIGINAL FATE, THIS CAN BE PROBLEMATIC!", 3)
 		config.FateLocation = ".\\"
 	else
-		cp("Fate directory not configured properly! Either modify the directory manually in config.ini, use '-set FateLocation <path\\to\\FATE>', or move this application to the fate directory itself!", 4)
+		cp("'fate.exe' not found - Fate directory not configured properly! Either modify the directory manually in config.ini, use '-set FateLocation \"<path\\to\\FATE>'\", or move this application to the fate directory itself!", 4)
 	end
 else
 	cp("Fate directory validity check was skipped!", 3)
 end
 
-if not lfs.attributes(".\\mods", "mode") == "directory" then
-    lfs.mkdir(".\\mods")
+if not lfs.attributes(getModFilePath(), "mode") == "directory" then
+    lfs.mkdir(getModFilePath())
 end
 
 function get_whole_ver(semverstr)
@@ -172,30 +196,40 @@ local function readFile(filePath)
     return content
 end
 
+local function findLongestCommonSuffixPrefix(str1, str2)
+	local minLength = math.min(#str1, #str2)
+	for i = 0, minLength do
+		if str1:sub(-i) == str2:sub(1, i) then
+			return i
+		end
+	end
+	return 0
+end
+
 local function createDirectories(folderPath)
+    local fullPath = folderPath:gsub("/", "\\") -- Normalize slashes
     local currentPath = ""
-    -- Check if the folderPath starts with a drive letter
-    local driveLetter = folderPath:match("^%a:")
+
+    -- Extract drive letter if applicable
+    local driveLetter = fullPath:match("^(%a:)\\")
     if driveLetter then
-        -- Add the drive letter segment to the currentPath
-        currentPath = driveLetter
-        -- Remove the drive letter from the folderPath
-        folderPath = folderPath:sub(4)
+        currentPath = driveLetter .. "\\"  -- Keep the drive letter properly formatted
+        fullPath = fullPath:sub(4)  -- Remove the drive letter from folderPath for iteration
     end
 
     -- Iterate over each segment in the folderPath
-    for segment in folderPath:gmatch("([^/\\]+)[/\\]?") do
-        currentPath = currentPath .. segment .. "/"
+    for segment in fullPath:gmatch("([^\\]+)") do
+        currentPath = currentPath .. segment .. "\\"  -- Build correct full path
         local success, err = lfs.mkdir(currentPath)
         if err == "File exists" then
-            -- Ignore errors for directories already existing
+            -- Ignore if directory already exists
         elseif not success then
-            return false, err
-            -- Return false if mkdir fails for any other reason
+            return false, err  -- Return false if mkdir fails for any other reason
         end
     end
     return true
 end
+
 
 
 local function createFolderPath(filePath)
@@ -272,14 +306,14 @@ local function copyFile(source, destination)
 	cp("Copying " .. source .. " to " .. destination, 1)
     local sourceFile = io.open(source, "rb")
     if not sourceFile then
-        cp("    Unable to open file: " .. source, 4)
+        cp("    Unable to open source file: " .. source, 4)
         return false, "Failed to open source file"
     end
     
     local destinationFile = io.open(destination, "wb")
     if not destinationFile then
         sourceFile:close()
-        cp("    Unable to open file: " .. destination, 4)
+        cp("    Unable to open destination file: " .. destination, 4)
         return false, "Failed to open destination file"
     end
     
@@ -362,6 +396,42 @@ local function getAllDirectories(directory)
     end
 
     return directories
+end
+
+local function getAllFiles(dir)
+	local files = {}
+
+	-- Helper function to recursively scan directories
+	local function scanDirectory(directory)
+		for file in lfs.dir(directory) do
+			if file ~= "." and file ~= ".." then
+				local filePath = directory .. "\\" .. file
+				local mode = lfs.attributes(filePath, "mode")
+				if mode == "file" then
+					table.insert(files, filePath)
+				elseif mode == "directory" then
+					scanDirectory(filePath)
+				end
+			end
+		end
+	end
+
+	-- Start scanning from the given directory
+	scanDirectory(dir)
+
+	return files
+end
+
+local function splitPath(filePath)
+	-- Find the last occurrence of the directory separator
+	local dir, file = filePath:match("^(.-)([^/\\]+)$")
+
+	-- If no separator is found, it means the file is in the current directory
+	if not dir or dir == "" then
+		dir = "."
+	end
+
+	return dir, file
 end
 
 local pretty_format_json_string = function(jsonString)
@@ -474,7 +544,7 @@ local sandbox = {}
 	sandbox.loadstring = sandbox.load
 	
 	sandbox.loadfile = function(luafile)
-		local f, err = loadfile(fpx_dir "/mods/" .. tostring(luafile))
+		local f, err = loadfile(getModFilePath() .. "\\mods\\" .. tostring(luafile))
 		if f then
 			setfenv(f, sandbox)
 		end
@@ -483,6 +553,22 @@ local sandbox = {}
 	
 	sandbox.dofile = function(luafile)
 		sandbox.loadfile(luafile)()
+	end
+	
+	sandbox.read_mod_file = function(nonluafile)
+		--read a file in the mod directory
+		local status = readFile(getModFilePath() .. "\\mods\\" .. tostring(nonluafile))
+		if status then
+			return status
+		end
+	end
+	
+	sandbox.read_game_file = function(nonluafile)
+		--read a file in the game directory
+		local status = readFile(getGameFilePath() .. "\\" .. tostring(nonluafile))
+		if status then
+			return status
+		end
 	end
 	
 	sandbox.require = function() end
@@ -501,7 +587,7 @@ local modlist = {
 	updated = os.date(),
 	mods = {},
 	index_table = {
-		['NO_DATA'] = ".\\no_index.txt",
+		['NO_DATA'] = getGameFilePath("no_index.txt"),
 	},
 }
 --load modlist.json
@@ -518,13 +604,15 @@ end
 
 local masterlist = {}
 
-if lfs.attributes(".\\master\\map.json", "mode") == "file" then
-	local mlstring = readFile(".\\master\\map.json")
+if lfs.attributes(getMasterFilePath("map.json"), "mode") == "file" then
+	local mlstring = readFile(getMasterFilePath("map.json"))
 	masterlist = read_json(mlstring)
 	cp("Masterlist loaded successfully", 2)
 else
 	cp("Masterlist not found! Please run -update !", 3)
-	config.make_json_pretty = "NO"
+	--disable formatting unless config.debug == 1 and the flag is already enabled
+	--why? Because this takes a LONG time for a first-run!
+	config.make_json_pretty = (tonumber(config.debug) > 1) and "NO" or config.make_json_pretty or "NO"
 end
 
 
@@ -739,14 +827,14 @@ queue_funcs = {
 		end
 		
 		cp("creating master copy...", 2)
-		if lfs.attributes(config.FateLocation .. "\\fate.exe", "mode") ~= "file" then
+		if lfs.attributes(getGameFilePath() .. "\\fate.exe", "mode") ~= "file" then
 			cp("Game location not configured!", 4)
 			err_flag = true
 			return
 		end
 		
-		local master_struct = copyFolder(config.FateLocation, ".\\master")
-		save_structure(".\\master\\map.json", master_struct)
+		local master_struct = copyFolder(getGameFilePath(), getMasterFilePath())
+		save_structure(getMasterFilePath("map.json"), master_struct)
 		
 		config.master_made = "YES"
 	end,
@@ -754,16 +842,16 @@ queue_funcs = {
 		--[[
 			-scan (no arguments)
 			
-			updates the list of games. 
+			updates the list of mods in the mods directory. 
 			-set external_manager YES if mods are managed by vortex
 		]]--
-		cp("scanning the \\mods directory...", 2)
-		local dirs = getAllDirectories(".\\mods")
+		cp("scanning the mods directory at " .. getModFilePath() .. "...", 2)
+		local dirs = getAllDirectories(getModFilePath())
 		
 		local patch_files = {}
 		for _, mod_dir in ipairs(dirs) do
-			if lfs.attributes("mods\\" .. mod_dir .. "\\patch.json", "mode") == "file" then
-				table.insert(patch_files, "mods\\" .. mod_dir)
+			if lfs.attributes(getModFilePath(mod_dir) .. "\\patch.json", "mode") == "file" then
+				table.insert(patch_files, getModFilePath(mod_dir))
 				cp("	Found a mod at " .. mod_dir, 2)
 			end
 		end
@@ -1051,8 +1139,33 @@ queue_funcs = {
 				
 				for _, folder_table in ipairs(patch_data.copy or {}) do
 					local destination_folder = folder_table.folder .. "\\"
+					destination_folder = destination_folder:gsub("./", "")
+					cp("Copy prestep: Destination: " .. destination_folder)
 					for _, outfile in ipairs(folder_table.content) do
-						copy_list[destination_folder .. (strip_path_from_file(outfile) or outfile)] = mod_folder .. "\\" .. outfile
+						--cp("	outfile: " .. outfile)
+						--cp("	mod_out: .\\" .. mod_folder .. "\\" .. outfile)
+						
+						local out_type = lfs.attributes(mod_folder .. "\\" .. outfile, "mode")
+						--cp("	out_type: " .. out_type)
+						
+						if out_type == "directory" then
+							local file_table = getAllFiles(mod_folder .. "\\" .. outfile)
+							--print(spickle(file_table))
+							for _, source_to_copy in ipairs(file_table) do
+								local seper_index = findLongestCommonSuffixPrefix(mod_folder .. "\\" .. outfile, source_to_copy)
+								--cp("		seperating at: " .. tostring(seper_index))
+								local source_to_use = source_to_copy:sub(seper_index + 2)
+								--cp("		seperation: " .. source_to_use)
+								
+								copy_list[destination_folder .. (strip_path_from_file(outfile) or outfile) .. "\\" .. source_to_use ] = mod_folder .. "\\" .. outfile .. "\\" .. source_to_use
+								
+								--cp("		result: ")
+								--cp("			destination: " .. destination_folder .. (strip_path_from_file(outfile) or outfile))
+								--cp("			pulled from: " .. mod_folder .. "\\" .. outfile .. "\\" .. source_to_use)
+							end
+						else
+							copy_list[destination_folder .. (strip_path_from_file(outfile) or outfile)] = mod_folder .. "\\" .. outfile
+						end
 					end
 				end
 				
@@ -1095,7 +1208,7 @@ queue_funcs = {
 		end
 		
 		--get last_edited file list to find files to revert/remove
-		local efstring = readFile(".\\master\\edited.json") or "{}"
+		local efstring = readFile(getMasterFilePath("edited.json")) or "{}"
 		local edited_files = read_json(efstring)
 		
 		--compare to copy_list's keys to find files we need to revert/remove
@@ -1105,8 +1218,7 @@ queue_funcs = {
 			end
 		end
 		
-		save_structure(".\\master\\edited.json", copy_list)
-		save_structure(".\\master\\patched.json", patch_list)
+		save_structure(getMasterFilePath("patched.json"), patch_list)
 		
 		--all files are accounted for. time to begin application.
 		--[[
@@ -1119,17 +1231,24 @@ queue_funcs = {
 		for destination_file, source_file in pairs(copy_list) do
 			local skip_this_file = false
 			if source_file == "REMOVE" then
-				local master_ver_exists = lfs.attributes(".\\master\\" .. destination_file, "mode") == "file"
-				if master_ver_exists then
-					source_file = ".\\master\\" .. destination_file
+				local valid_types = {
+					file = true,
+					directory = true,
+				}
+				local master_ver_type = lfs.attributes(getMasterFilePath(destination_file), "mode")
+				
+				if valid_types[master_ver_type] then
+					--source does exist in the master
+					source_file = getMasterFilePath(destination_file)
 				else
+					--source doesn't exist in master, delete file/directory
 					local is_dir = lfs.attributes(destination_file, "mode") == "directory"
 					if is_dir then
 						cp("DELETE DIRECTORY " .. destination_file, 2)
 						removeDirectory(destination_file)
 					else
 						cp("DELETE FILE " .. destination_file, 2)
-						local status, err = os.remove(config.FateLocation .. "\\" .. destination_file)
+						local status, err = os.remove(getGameFilePath(destination_file))
 						if not status then
 							cp("	Failed to delete file: " .. tostring(err), 4)
 						end
@@ -1139,10 +1258,18 @@ queue_funcs = {
 				end
 			end
 			if not skip_this_file then
+				source_file = source_file:gsub("\\+", "\\")
+				
+				destination_file = getGameFilePath(destination_file)
+				destination_file = destination_file:gsub("\\+", "\\")
+				
 				cp("COPY " .. source_file .. " to " .. destination_file, 2)
-				copyFile(".\\" .. source_file, config.FateLocation .. "\\" .. destination_file)
+				copyFile(source_file, destination_file)
+				--error("STOP HERE")
 			end
 		end
+		
+		save_structure(getMasterFilePath("edited.json"), copy_list)
 		
 		cp("Patch step: Adding additional content to existing data files", 2)
 		
@@ -1152,10 +1279,10 @@ queue_funcs = {
 			local open_file = ""
 			if overrides[destination_index] then
 				cp("	/current copy of file/", 1)
-				open_file = readFile(".\\" .. destination_file) or ""
+				open_file = readFile(getGameFilePath(destination_file)) or "error!?-"
 			else
 				cp("	/master copy of file/", 1)
-				open_file = readFile(".\\master\\" .. destination_file) or ""
+				open_file = readFile(getMasterFilePath(destination_file)) or "error?!+"
 			end
 			
 			for _, patch_to_apply in ipairs(patch_table) do
@@ -1164,7 +1291,7 @@ queue_funcs = {
 				open_file = open_file .. "\n\n" .. patch_data
 			end
 			
-			writeFile(config.FateLocation .. "\\" .. destination_file, open_file)
+			writeFile(getGameFilePath(destination_file), open_file)
 		end
 		
 		if seq_list[1] then
@@ -1174,8 +1301,8 @@ queue_funcs = {
 			
 			for seq_file, seq_data in pairs(seq_list) do
 				local seq_destination = seq_data.result_directory
-				local target_destination_path = config.FateLocation .. "\\" .. seq_destination
-				local master_destination_path = config.FateLocation .. "\\master\\" .. seq_destination
+				local target_destination_path = getGameFilePath(seq_destination)
+				local master_destination_path = getMasterFilePath(seq_destination)
 				local start_index = 0 --number of originals in master
 				
 				--convert media?.ext to %media%d%.ext
@@ -1197,11 +1324,11 @@ queue_funcs = {
 					copy_list[seq_destination .. "\\" .. filename] = "DELETE_ME" --always remove, music will be reordered every time
 					--this ensures the music is never accidentally duplicated
 					
-					cp("SEQCOPY " .. media_obj .. " to " .. filename, 2)
-					copyFile(".\\" .. media_obj, target_destination_path .. "\\" .. filename)
+					cp("SEQCOPY " .. media_obj .. " to " .. filename .. " at location " .. target_destination_path, 2)
+					copyFile(media_obj, target_destination_path .. "\\" .. filename)
 				end
 			end
-			save_structure(".\\master\\edited.json", copy_list)
+			save_structure(getMasterFilePath("edited.json"), copy_list)
 				--resave this because sequence files were added
 		end
 		
@@ -1211,7 +1338,7 @@ queue_funcs = {
 			
 			for destination_index, script_list in pairs(exec_list) do
 				local destination_file = modlist.index_table[destination_index] or "no_index.txt"
-				local open_file = readFile(".\\" .. destination_file) or ""
+				local open_file = readFile(getModFilePath(destination_file)) or ""
 				
 				cp("	" .. destination_index .. ": ", 1)
 				for _, script_to_apply in ipairs(script_list) do
@@ -1246,7 +1373,7 @@ queue_funcs = {
 					end
 				end
 				
-				writeFile(config.FateLocation .. "\\" .. destination_file, open_file)
+				writeFile(getGameFilePath(destination_file), open_file)
 			end
 			
 		end
